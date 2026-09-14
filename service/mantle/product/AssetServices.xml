@@ -3263,6 +3263,39 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <set field="newStatusId" from="autoStatusId ?: asset.statusId"/>
 
+                <!-- Card 772: originalQuantity must be PRORATED across the split, not cloned.
+                     The new asset below is created from asset.getMap(), which carries originalQuantity
+                     over unchanged, and the source's own value was never reduced — so after a split both
+                     tags claimed the full pre-split original quantity and a tag's split lineage summed to
+                     more fruit than was ever received. Anything reading originalQuantity was affected:
+                     AssetDetail, FindAsset, SelectAsset, and AssetReceiptAndFacilitySummary, which sums
+                     it across assets.
+
+                     Split the value in the same ratio as the quantity, and take the moved share OUT of
+                     the source, so source + split always reconcile to the pre-split figure. Computing
+                     the remainder by subtraction rather than by a second multiplication is what makes
+                     chained splits reconcile too: no rounding residue accumulates down the chain, it
+                     stays with the source.
+
+                     Nothing is lost by prorating. What the tag was originally RECEIVED as is still
+                     recorded on AssetReceipt.quantityAccepted, and the split lineage itself is on the
+                     AssetDetail rows this service writes.
+
+                     Untouched: a full move (the else branch below updates the asset in place, so its
+                     originalQuantity is already correct), and a move into an EXISTING asset, where the
+                     target's own originalQuantity is not ours to restate. -->
+                <set field="preSplitQoh" from="asset.quantityOnHandTotal"/>
+                <set field="movedOriginalQuantity" from="null"/>
+                <if condition="asset.originalQuantity != null &amp;&amp; preSplitQoh &amp;&amp; preSplitQoh > 0">
+                    <script><![CDATA[
+                        BigDecimal preOrig = asset.originalQuantity as BigDecimal
+                        BigDecimal moved = (preOrig * (quantity as BigDecimal))
+                                .divide(preSplitQoh as BigDecimal, 6, java.math.RoundingMode.HALF_UP)
+                        if (moved > preOrig) moved = preOrig
+                        context.movedOriginalQuantity = moved
+                    ]]></script>
+                </if>
+
                 <!-- look for an existing Asset record to move to -->
                 <if condition="!forceNewAsset">
                     <entity-find entity-name="mantle.product.asset.Asset" list="existingAssetList">
@@ -3285,11 +3318,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="newAssetId" from="existingAssetList[0].assetId"/>
                     <!-- <log level="warn" message="In move from Asset ${asset.assetId} found existing move to Asset ${existingAssetList[0]}"/> -->
                 </then><else>
-                    <!-- clone asset in new facility/location with quantity -->
+                    <!-- clone asset in new facility/location with quantity; card 772: originalQuantity
+                         is the split-off share, not the source's whole value -->
                     <service-call name="create#mantle.product.asset.Asset" out-map="newAssetOut"
                             in-map="asset.getMap() + [assetId:null, facilityId:facilityId, locationSeqId:locationSeqId,
                                 containerId:containerId, quantityOnHandTotal:0, availableToPromiseTotal:0,
-                                statusId:newStatusId, assetPoolId:assetPoolId]"/>
+                                statusId:newStatusId, assetPoolId:assetPoolId,
+                                originalQuantity:movedOriginalQuantity]"/>
                     <set field="newAssetId" from="newAssetOut.assetId"/>
                 </else></if>
 
@@ -3343,6 +3378,26 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="create#mantle.product.asset.AssetDetail" out-map="context"
                         in-map="[assetId:assetId, effectiveDate:ec.user.nowTimestamp, quantityOnHandDiff:-quantity,
                                  availableToPromiseDiff:-quantity, productId:productId, otherAssetId:newAssetId]"/>
+
+                <!-- card 772: and take the moved share out of the source's originalQuantity, so the two
+                     sides of the split reconcile to what the source held before it. Only when the split
+                     actually minted a NEW asset: moving into an existing one leaves that asset's own
+                     originalQuantity alone, so reducing the source here would lose the difference. -->
+                <if condition="movedOriginalQuantity != null &amp;&amp; !existingAssetList">
+                    <entity-find-one entity-name="mantle.product.asset.Asset" value-field="sourceAssetForOrig" for-update="true">
+                        <field-map field-name="assetId" from="assetId"/></entity-find-one>
+                    <if condition="sourceAssetForOrig?.originalQuantity != null">
+                        <!-- re-read rather than reusing the `asset` value loaded at the top: the
+                             AssetDetail rows above moved quantity through EECAs, so that copy's
+                             quantityOnHandTotal is stale and writing it back would clobber the move -->
+                        <script><![CDATA[
+                            BigDecimal remaining = (sourceAssetForOrig.originalQuantity as BigDecimal) - (movedOriginalQuantity as BigDecimal)
+                            if (remaining < 0G) remaining = 0G
+                            sourceAssetForOrig.originalQuantity = remaining
+                        ]]></script>
+                        <entity-update value-field="sourceAssetForOrig"/>
+                    </if>
+                </if>
             </then><else>
                 <!-- make sure can change from asset.statusId to autoStatusId -->
                 <if condition="autoStatusId">
