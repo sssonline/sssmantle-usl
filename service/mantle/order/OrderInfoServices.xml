@@ -1576,8 +1576,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <auto-parameters entity-name="moqui.basic.Geo"/></parameter>
                 <parameter name="telecomNumber" type="Map">
                     <auto-parameters entity-name="mantle.party.contact.TelecomNumber"/></parameter>
-                <parameter name="facility" type="Map">
+                <parameter name="facility" type="Map"><description>SSS (card 974): the part's Ship To facility.</description>
                     <auto-parameters entity-name="mantle.facility.Facility"/></parameter>
+                <parameter name="shipFromFacility" type="Map"><description>SSS (card 974): the part's Ship From (OrderPart.facilityId); null on legacy parts.</description>
+                    <auto-parameters entity-name="mantle.facility.Facility"/></parameter>
+                <parameter name="shipFromContactInfo" type="Map"><description>SSS (card 974): address of the part's Ship From facility.</description></parameter>
                 <parameter name="facilityContactInfo" type="Map">
                     <parameter name="postalContactMechId"/>
                     <parameter name="postalContactMechPurposeId"/>
@@ -2094,14 +2097,34 @@ along with this software (see the LICENSE.md file). If not, see
                 EntityValue telecomNumber = (EntityValue) orderPart.'mantle.party.contact.TelecomNumber'
                 EntityValue postalAddress = (EntityValue) orderPart.'mantle.party.contact.PostalAddress'
                 EntityValue postalAddressStateGeo = (EntityValue) postalAddress?."StateProvince#moqui.basic.Geo"
-                EntityValue facility = (EntityValue) orderPart.'mantle.facility.Facility'
+                // SSS customization (card 974): on a sales part OrderPart.facilityId is the Ship From (a vendor
+                // warehouse) and the customer destination is the basalt extend field shipToFacilityId. Every sales
+                // screen reads facility/facilityContactInfo as the SHIP TO, so those keys keep that meaning:
+                // shipToFacilityId, else a legacy part whose facilityId is still the customer's facility.
+                // The Ship From is exposed separately as shipFromFacility (null on legacy parts).
+                EntityValue partFacility = (EntityValue) orderPart.'mantle.facility.Facility'
+                boolean legacyShipTo = !orderPart.shipToFacilityId && partFacility != null &&
+                        partFacility.ownerPartyId && partFacility.ownerPartyId == orderPart.customerPartyId
+                String shipToFacId = orderPart.shipToFacilityId ?: (legacyShipTo ? orderPart.facilityId : null)
+                EntityValue facility = shipToFacId ? ec.entity.find("mantle.facility.Facility")
+                        .condition("facilityId", shipToFacId).useCache(true).one() : null
+                EntityValue shipFromFacility = legacyShipTo ? null : partFacility
                 Map facilityContactInfo = null
                 if (facility) {
                     Map facShipOut = ec.service.sync().name("mantle.facility.ContactServices.get#FacilityDefaultShipDest")
-                            .parameter("facilityId", orderPart.facilityId).call()
+                            .parameter("facilityId", shipToFacId).call()
                     facilityContactInfo = ec.service.sync().name("mantle.facility.ContactServices.get#FacilityContactInfo")
-                            .parameters([facilityId:orderPart.facilityId, postalContactMechId:facShipOut.postalContactMechId,
+                            .parameters([facilityId:shipToFacId, postalContactMechId:facShipOut.postalContactMechId,
                                          telecomContactMechId:facShipOut.telecomContactMechId]).call()
+                }
+
+                Map shipFromContactInfo = null
+                if (shipFromFacility) {
+                    Map fromShipOut = ec.service.sync().name("mantle.facility.ContactServices.get#FacilityDefaultShipDest")
+                            .parameter("facilityId", shipFromFacility.facilityId).call()
+                    shipFromContactInfo = ec.service.sync().name("mantle.facility.ContactServices.get#FacilityContactInfo")
+                            .parameters([facilityId:shipFromFacility.facilityId, postalContactMechId:fromShipOut.postalContactMechId,
+                                         telecomContactMechId:fromShipOut.telecomContactMechId]).call()
                 }
 
                 def duplicateOrderPartList = null
@@ -2124,7 +2147,7 @@ along with this software (see the LICENSE.md file). If not, see
                         partPaymentList:partPaymentList, partPaymentInfoList:partPaymentInfoList,
                         paymentsTotal:paymentsTotal, partTotalUnpaid:partTotalUnpaid,
                         postalAddress:postalAddress, postalAddressStateGeo:postalAddressStateGeo,
-                        telecomNumber:telecomNumber, facility:facility,
+                        telecomNumber:telecomNumber, facility:facility, shipFromFacility:shipFromFacility, shipFromContactInfo:shipFromContactInfo,
                         facilityContactInfo:facilityContactInfo, customerDetail:customerDetail, customerEmail:customerEmail,
                         vendorDetail:vendorDetail, isCustomerInternalOrg:isCustomerInternalOrg, isVendorInternalOrg:isVendorInternalOrg,
                         orderPartPartyList:orderPartPartyList, customerShipToDetail:customerShipToDetail,

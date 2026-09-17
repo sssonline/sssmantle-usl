@@ -660,6 +660,23 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!(orderHeader.statusId in resStatusList) || !(orderPart.statusId in resStatusList)"><return/></if>
             </if>
 
+            <!-- SSS customization (card 974): this runs after EVERY OrderItem update (price, description, display
+                 order...), and with resetReservations=true it releases every reservation on the line and re-reserves it.
+                 Now that sales reservations sit on real tags at the Ship From, the release first offers the freed stock to
+                 other orders' shortfalls (reserveIncreasedAsset), so a price-only edit could hand the line's fruit to
+                 another order. Skip the reset when the line is already exactly covered: same product on every
+                 reservation and (not-yet-issued reserved + issued) == quantity. Any quantity or product change still differs, so it still
+                 resets — which is also what trims an over-reservation after a quantity decrease. -->
+            <if condition="resetReservations &amp;&amp; existingResList">
+                <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="checkIssuanceList">
+                    <econdition field-name="orderId"/><econdition field-name="orderItemSeqId"/></entity-find>
+                <set field="checkCovered" from="(existingResList.sum(0.0) { it.quantityNotIssued ?: 0.0 }) + (checkIssuanceList.sum(0.0) { it.quantity ?: 0.0 })"/>
+                <set field="checkSameProduct" from="existingResList.every { it.productId == orderItem.productId }"/>
+                <if condition="checkSameProduct &amp;&amp; orderItem.quantity != null &amp;&amp; checkCovered == (orderItem.quantity as BigDecimal)">
+                    <return/>
+                </if>
+            </if>
+
             <!-- reserve assets, or update reservations as needed -->
             <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem" in-map="context"/>
         </actions>
@@ -1076,6 +1093,15 @@ along with this software (see the LICENSE.md file). If not, see
                 </iterate>
 
                 <set field="quantityRemaining" from="0.0"/>
+            </if>
+
+            <!-- SSS customization (card 974): a 'not available' placeholder needs a facility (create#ProductAssetAdHoc
+                 requires one). Sales parts carry their Ship From in OrderPart.facilityId, but EDI, return replacements and
+                 REST can place a part with no facility and no ProductStore — skip the placeholder with a warning instead of
+                 failing the whole placement. The line is simply left short, which re-placing with a Ship From fixes. -->
+            <if condition="quantityRemaining &gt; 0.0 &amp;&amp; !inventoryFacilityId">
+                <message type="warning">Order ${orderId} item ${orderItemSeqId}: ${quantityRemaining} could not be reserved and no shortfall placeholder was recorded because the order part has no Ship From facility.</message>
+                <return/>
             </if>
 
             <if condition="quantityRemaining &gt; 0.0">
