@@ -2146,6 +2146,10 @@ General Order Placement and eCommerce Usage
                  null. Mirrors basalt's own clone#Order; the recurring-order job comes through here, and a
                  copied pseudoId made every recurrence clone (and its auto-invoice) share the source's number. -->
             <set field="orderHeader.pseudoId" from="orderHeader.pseudoId ? orderHeader.orderId : null"/>
+            <!-- SSS customization (card 981): the sales-invoice number counter (basalt-extended
+                 lastInvoiceSuffixSeq) counts the SOURCE order's invoices; a clone starts unnumbered so its
+                 first invoice gets the clone's bare Order ID. -->
+            <set field="orderHeader.lastInvoiceSuffixSeq" from="null"/>
 
             <if condition="clearDates">
                 <!-- set the fields even if null, don't do this for other fields -->
