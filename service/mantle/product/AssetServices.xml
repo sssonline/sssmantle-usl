@@ -3289,36 +3289,25 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <set field="newStatusId" from="autoStatusId ?: asset.statusId"/>
 
-                <!-- Card 772: originalQuantity must be PRORATED across the split, not cloned.
-                     The new asset below is created from asset.getMap(), which carries originalQuantity
-                     over unchanged, and the source's own value was never reduced — so after a split both
-                     tags claimed the full pre-split original quantity and a tag's split lineage summed to
-                     more fruit than was ever received. Anything reading originalQuantity was affected:
-                     AssetDetail, FindAsset, SelectAsset, and AssetReceiptAndFacilitySummary, which sums
-                     it across assets.
+                <!-- Cards 772 / 1058 (sssonline): a tag's originalQuantity is the quantity it was created with, and it is a
+                     CONSERVED total: across every tag a split or merge connects, the values add up to the receipts
+                     behind them. Pool billing and the packout statements sum it to decide what a grower is charged, so
+                     a move must neither duplicate nor lose any of it. A move therefore MOVES the moved amount itself:
+                     the destination gains the quantity moved and the source gives up the same quantity, whether this
+                     service mints the destination (a split) or merges into an existing tag. No ratio, no division:
+                     originalQuantity does not track quantity on hand (issuing drains QOH and never touches it), so
+                     prorating by QOH gave a tag received at 20 with 5 issued 13.333333 instead of 10 for a move of 10.
+                     The amount is capped at what the source still holds, so a source whose originalQuantity is already
+                     below its QOH reaches zero without the destination inventing the difference.
 
-                     Split the value in the same ratio as the quantity, and take the moved share OUT of
-                     the source, so source + split always reconcile to the pre-split figure. Computing
-                     the remainder by subtraction rather than by a second multiplication is what makes
-                     chained splits reconcile too: no rounding residue accumulates down the chain, it
-                     stays with the source.
-
-                     Nothing is lost by prorating. What the tag was originally RECEIVED as is still
-                     recorded on AssetReceipt.quantityAccepted, and the split lineage itself is on the
-                     AssetDetail rows this service writes.
-
-                     Untouched: a full move (the else branch below updates the asset in place, so its
-                     originalQuantity is already correct), and a move into an EXISTING asset, where the
-                     target's own originalQuantity is not ours to restate. -->
-                <set field="preSplitQoh" from="asset.quantityOnHandTotal"/>
+                     Untouched: a whole-tag move that relocates the tag itself (the else branch below updates it in
+                     place, minting and merging nothing). The value is maintained, not a copy of
+                     AssetReceipt.quantityAccepted: do not write code that assumes it can drift. -->
                 <set field="movedOriginalQuantity" from="null"/>
-                <if condition="asset.originalQuantity != null &amp;&amp; preSplitQoh &amp;&amp; preSplitQoh > 0">
+                <if condition="asset.originalQuantity != null">
                     <script><![CDATA[
-                        BigDecimal preOrig = asset.originalQuantity as BigDecimal
-                        BigDecimal moved = (preOrig * (quantity as BigDecimal))
-                                .divide(preSplitQoh as BigDecimal, 6, java.math.RoundingMode.HALF_UP)
-                        if (moved > preOrig) moved = preOrig
-                        context.movedOriginalQuantity = moved
+                        BigDecimal held = (asset.originalQuantity as BigDecimal).max(0G)
+                        context.movedOriginalQuantity = (quantity as BigDecimal).min(held)
                     ]]></script>
                 </if>
 
@@ -3344,8 +3333,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="newAssetId" from="existingAssetList[0].assetId"/>
                     <!-- <log level="warn" message="In move from Asset ${asset.assetId} found existing move to Asset ${existingAssetList[0]}"/> -->
                 </then><else>
-                    <!-- clone asset in new facility/location with quantity; card 772: originalQuantity
-                         is the split-off share, not the source's whole value -->
+                    <!-- clone asset in new facility/location with quantity; cards 772/1058: originalQuantity
+                         is the amount moved, not the source's whole value -->
                     <service-call name="create#mantle.product.asset.Asset" out-map="newAssetOut"
                             in-map="asset.getMap() + [assetId:null, facilityId:facilityId, locationSeqId:locationSeqId,
                                 containerId:containerId, quantityOnHandTotal:0, availableToPromiseTotal:0,
@@ -3405,11 +3394,18 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="[assetId:assetId, effectiveDate:ec.user.nowTimestamp, quantityOnHandDiff:-quantity,
                                  availableToPromiseDiff:-quantity, productId:productId, otherAssetId:newAssetId]"/>
 
-                <!-- card 772: and take the moved share out of the source's originalQuantity, so the two
-                     sides of the split reconcile to what the source held before it. Only when the split
-                     actually minted a NEW asset: moving into an existing one leaves that asset's own
-                     originalQuantity alone, so reducing the source here would lose the difference. -->
-                <if condition="movedOriginalQuantity != null &amp;&amp; !existingAssetList">
+                <!-- card 1058: a merge into an existing tag adds the moved amount to that tag's originalQuantity
+                     (a minted tag was created holding it above) -->
+                <if condition="movedOriginalQuantity != null &amp;&amp; existingAssetList">
+                    <entity-find-one entity-name="mantle.product.asset.Asset" value-field="targetAssetForOrig" for-update="true">
+                        <field-map field-name="assetId" from="newAssetId"/></entity-find-one>
+                    <!-- re-read for the same reason as the source below: the AssetDetail rows moved quantity through EECAs -->
+                    <set field="targetAssetForOrig.originalQuantity" from="(targetAssetForOrig.originalQuantity ?: 0G) + movedOriginalQuantity"/>
+                    <entity-update value-field="targetAssetForOrig"/>
+                </if>
+                <!-- cards 772/1058: and take the moved amount out of the source's originalQuantity, split or merge, so
+                     the two sides add up to what they held before the move -->
+                <if condition="movedOriginalQuantity != null">
                     <entity-find-one entity-name="mantle.product.asset.Asset" value-field="sourceAssetForOrig" for-update="true">
                         <field-map field-name="assetId" from="assetId"/></entity-find-one>
                     <if condition="sourceAssetForOrig?.originalQuantity != null">

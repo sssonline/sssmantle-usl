@@ -560,6 +560,10 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="orderPartSeqId" entity-alias="OITM"/>
     </view-entity>
     <view-entity entity-name="AssetIssuanceOriginSummary" package="mantle.product.issuance">
+        <description>Card #1056 (sssonline): originalQuantity is a plain per-asset column, not a sum. Summed across this
+            join it was counted once per issuance row, so a tag issued in N rows contributed N times its original
+            quantity. A consumer must select assetId, so each row is one asset (quantity = that asset's issuances,
+            originalQuantity = once); roll rows up afterwards with sssonline.aspen.FieldServices.rollup#IssuanceOriginRows.</description>
         <member-entity entity-alias="ASI" entity-name="mantle.product.issuance.AssetIssuance"/>
         <member-entity entity-alias="AST" entity-name="mantle.product.asset.Asset" join-from-alias="ASI">
             <key-map field-name="assetId"/></member-entity>
@@ -577,7 +581,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="ASI" name="quantityCancelled" function="sum"/>
         <alias entity-alias="AST" name="availableToPromiseTotal" function="sum"/>
         <alias entity-alias="AST" name="quantityOnHandTotal" function="sum"/>
-        <alias entity-alias="AST" name="originalQuantity" function="sum"/>
+        <alias entity-alias="AST" name="originalQuantity"/>
     </view-entity>
 
     <view-entity entity-name="AssetAndReservation" package="mantle.product.issuance">
@@ -668,6 +672,9 @@ along with this software (see the LICENSE.md file). If not, see
             <exclude field="assetTypeEnumId"/><exclude field="ownerPartyId"/></alias-all>
     </view-entity>
     <view-entity entity-name="AssetAndReceiptSummary" package="mantle.product.receipt">
+        <description>Card #1056 (sssonline): originalQuantity is a plain per-asset column, not a sum. Summed across this
+            join it was counted once per AssetReceipt row, so an asset with two receipts read double. A consumer that
+            reads it must select assetId, so each row is one asset.</description>
         <member-entity entity-alias="ASR" entity-name="mantle.product.receipt.AssetReceipt"/>
         <member-entity entity-alias="AST" entity-name="mantle.product.asset.Asset" join-from-alias="ASR">
             <key-map field-name="assetId"/></member-entity>
@@ -682,7 +689,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="quantityRejected" entity-alias="ASR" function="sum"/>
         <alias name="quantityOnHandTotal" entity-alias="AST" function="sum"/>
         <alias name="availableToPromiseTotal" entity-alias="AST" function="sum"/>
-        <alias name="originalQuantity" entity-alias="AST" function="sum"/>
+        <alias name="originalQuantity" entity-alias="AST"/>
         <alias name="receivedDate" entity-alias="AST" function="min"/>
         <alias name="manufacturedDate" entity-alias="AST" function="min"/>
         <alias name="expectedEndOfLife" entity-alias="AST" function="min"/>
