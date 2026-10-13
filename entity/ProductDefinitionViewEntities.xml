@@ -324,6 +324,9 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="productFeatureId" entity-alias="PFA" field="productFeatureId"/>
 
         <!-- 2) AGGREGATED feature ids for DISPLAY ONLY -->
+        <!-- POSTGRES: LISTAGG does not exist on Postgres (works on db2i/h2). This view is unused today; before using it,
+             switch the function per database (same argument shape, Postgres name is STRING_AGG):
+             function="${ec.entity.getDatabaseConfName('mantle.product.Product') == 'postgres' ? 'STRING_AGG' : 'LISTAGG'}" -->
         <alias name="productFeatureIds" type="text-medium" is-aggregate="true">
             <complex-alias function="LISTAGG">
                 <complex-alias-field entity-alias="PFA" field="productFeatureId"/>

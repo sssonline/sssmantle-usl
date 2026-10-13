@@ -1165,6 +1165,15 @@ along with this software (see the LICENSE.md file). If not, see
         <member-entity entity-alias="PMT" entity-name="mantle.account.payment.Payment" join-from-alias="BAC">
             <key-map field-name="paymentId"/>
         </member-entity>
+        <!-- Join-side check number: PaymentMethodTrans.checkNumber is text, BankAccountCheck.checkNumber is numeric.
+             The checkNumber key-map uses the first alias on PMTMT.checkNumber (this one, alias-all entries are appended
+             after it), so on Postgres the ON clause compares a numeric cast; non-numeric statement check numbers become
+             NULL and simply don't match. db2i/h2 keep the plain PMTMT.CHECK_NUMBER = BAC.CHECK_NUMBER comparison. -->
+        <alias name="checkNumberJoin" entity-alias="PMTMT" field="checkNumber" type="text-short">
+            <complex-alias expression="${ec.entity.getDatabaseConfName('mantle.account.method.PaymentMethodTrans') == 'postgres' ?
+                    'CASE WHEN TRIM(PMTMT.CHECK_NUMBER) &lt;&gt; \'\' AND TRIM(PMTMT.CHECK_NUMBER) !~ \'[^0-9]\' THEN CAST(TRIM(PMTMT.CHECK_NUMBER) AS NUMERIC) END' :
+                    'PMTMT.CHECK_NUMBER'}"/>
+        </alias>
         <alias-all entity-alias="PMTMT">
             <exclude field="paymentId"/>
         </alias-all>
