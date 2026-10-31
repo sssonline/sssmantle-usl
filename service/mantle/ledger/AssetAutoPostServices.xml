@@ -211,6 +211,13 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="assetIssuance == null"><return error="true" message="Not posting inventory transaction, could not find Asset Issuance with ID ${assetIssuanceId}"/></if>
             <if condition="!assetIssuance.quantity"><return message="No quantity issued, not posting inventory transaction to GL for issuance ${assetIssuanceId}"/></if>
 
+            <!-- SSS (Aspen #1221 PC Tag Book Value and the Last Carton): a Purchased Commodity tag posts through Aspen
+                 (Purchased Commodity Inventory, last-carton book value, Commodity Purchase journal); handled = false for
+                 every other tag, which posts below as before -->
+            <service-call name="sssonline.aspen.PcInventoryServices.post#PcTagIssuance" out-map="pcIssueOut"
+                    out-map-add-to-existing="false" in-map="[assetIssuanceId:assetIssuanceId]"/>
+            <if condition="pcIssueOut.handled"><set field="acctgTransId" from="pcIssueOut.acctgTransId"/><return/></if>
+
             <set field="asset" from="assetIssuance.'mantle.product.asset.Asset'"/>
             <set field="organizationPartyId" from="asset.ownerPartyId"/>
 
@@ -391,6 +398,11 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.product.issuance.AssetIssuance" value-field="assetIssuance" for-update="true"/>
             <if condition="assetIssuance == null"><return error="true" message="In repost could not find Asset Issuance with ID ${assetIssuanceId}"/></if>
+            <!-- SSS (Aspen #1221): a Purchased Commodity tag's posting is never unposted or deleted; Aspen reverses and
+                 reposts it (handled = false for every other tag, which keeps the unpost-and-delete below) -->
+            <service-call name="sssonline.aspen.PcInventoryServices.repost#PcTagIssuance" out-map="pcRepostOut"
+                    out-map-add-to-existing="false" in-map="[assetIssuanceId:assetIssuanceId]"/>
+            <if condition="pcRepostOut.handled"><set field="acctgTransId" from="pcRepostOut.acctgTransId"/><return/></if>
             <!-- only fail if null to allow setting to zero to delete original TX and not create new one -->
             <if condition="assetIssuance.quantity == null"><return message="No quantity issued (is null), not reposting inventory transaction to GL for issuance ${assetIssuanceId}"/></if>
 
@@ -750,6 +762,12 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.product.asset.AssetDetail" value-field="assetDetail" for-update="true"/>
             <if condition="!assetDetail.physicalInventoryId"><return/></if>
             <if condition="!assetDetail.quantityOnHandDiff"><return/></if>
+
+            <!-- SSS (Aspen #1221): a count of a Purchased Commodity tag posts through Aspen (last-carton book value,
+                 Commodity Purchase journal); handled = false for every other tag, which posts below as before -->
+            <service-call name="sssonline.aspen.PcInventoryServices.post#PcTagCount" out-map="pcCountOut"
+                    out-map-add-to-existing="false" in-map="[assetDetailId:assetDetailId]"/>
+            <if condition="pcCountOut.handled"><set field="acctgTransId" from="pcCountOut.acctgTransId"/><return/></if>
 
             <set field="assetId" from="assetDetail.assetId"/>
             <set field="physicalInventoryId" from="assetDetail.physicalInventoryId"/>

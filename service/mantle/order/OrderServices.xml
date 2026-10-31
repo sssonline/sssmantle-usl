@@ -2385,17 +2385,64 @@ General Order Placement and eCommerce Usage
                 <select-field field-name="invoiceId"/>
             </entity-find>
             <!-- If one was found and it has an invoice id: and at least one is not InvoiceCancelled -->
+            <set field="orderInvoiced" from="false"/>
             <iterate list="invoiceItemsContainingOrder" entry="invoiceId">
-            <if condition="invoiceId">
+            <if condition="invoiceId &amp;&amp; !orderInvoiced">
                 <entity-find-one entity-name="Invoice" value-field="invoice">
                     <field-map field-name="invoiceId" from="invoiceId.invoiceId"/>
                 </entity-find-one>
-                <!-- Then we cannot make edits to this order: -->
-                <if condition="invoice?.statusId != 'InvoiceCancelled'">
-                    <return error="true" message="Order has already been invoiced. Cannot make changes to it."/>
-                </if>
+                <if condition="invoice?.statusId != 'InvoiceCancelled'"><set field="orderInvoiced" from="true"/></if>
             </if>
             </iterate>
+            <!-- Then we cannot make edits to this order, except (SSS #1216) Cancel Order cutting what isn't billed, and (SSS #1185) a new line on an un-billed part that takes lines
+                 (cancel#OrderItem): an update that only lowers quantity / raises quantityCancelled and keeps at least the
+                 item's billed quantity, or prorates the unit amount of an item with nothing billed -->
+            <if condition="orderInvoiced">
+                <script><![CDATA[
+                    boolean cancelCut = false
+                    if (eecaOperation == 'update' && originalValue && orderItemSeqId) {
+                        def cur = ec.entity.find("mantle.order.OrderItem").condition([orderId:orderId, orderItemSeqId:orderItemSeqId])
+                                .useCache(false).one()
+                        if (cur != null) {
+                            List<String> changed = cur.getMap().keySet().findAll { String k -> k != 'lastUpdatedStamp' && cur.get(k) != originalValue.get(k) } as List<String>
+                            BigDecimal billedQty = 0.0G
+                            for (def oib in ec.entity.find("mantle.order.OrderItemBilling").condition([orderId:orderId, orderItemSeqId:orderItemSeqId]).useCache(false).list()) {
+                                def billedInvoice = ec.entity.find("mantle.account.invoice.Invoice").condition("invoiceId", oib.invoiceId).useCache(false).one()
+                                if (billedInvoice?.statusId != 'InvoiceCancelled') billedQty += ((oib.quantity ?: 0.0G) as BigDecimal)
+                            }
+                            BigDecimal newQty = (cur.quantity ?: 0.0G) as BigDecimal, oldQty = (originalValue.quantity ?: 0.0G) as BigDecimal
+                            BigDecimal newCancelled = (cur.quantityCancelled ?: 0.0G) as BigDecimal, oldCancelled = (originalValue.quantityCancelled ?: 0.0G) as BigDecimal
+                            cancelCut = changed && changed.every { it in ['quantity', 'quantityCancelled', 'unitAmount'] } &&
+                                    newQty <= oldQty && newCancelled >= oldCancelled && newQty >= billedQty &&
+                                    (!('unitAmount' in changed) || billedQty.signum() == 0)
+                        }
+                    } else if (eecaOperation == 'create' && orderItemSeqId) {
+                        // SSS #1185: a new line on a part none of whose lines is billed (a re-opened Purchased Commodity
+                        // order's new part), and only while that part takes new lines: a sales part while it and its order
+                        // are Open; a purchase part in an editable status, or a Placed part of a Purchased Commodity order
+                        def cur = ec.entity.find("mantle.order.OrderItem").condition([orderId:orderId, orderItemSeqId:orderItemSeqId])
+                                .useCache(false).one()
+                        def part = cur ? ec.entity.find("mantle.order.OrderPart").condition([orderId:orderId, orderPartSeqId:cur.orderPartSeqId])
+                                .useCache(false).one() : null
+                        def header = ec.entity.find("mantle.order.OrderHeader").condition("orderId", orderId).useCache(false).one()
+                        if (part != null && header != null) {
+                            List<String> partSeqIds = ec.entity.find("mantle.order.OrderItem").condition([orderId:orderId, orderPartSeqId:part.orderPartSeqId])
+                                    .useCache(false).list()*.orderItemSeqId
+                            boolean partBilled = ec.entity.find("mantle.order.OrderItemBilling").condition("orderId", orderId)
+                                    .condition("orderItemSeqId", "in", partSeqIds).useCache(false).list().any { oib ->
+                                        ec.entity.find("mantle.account.invoice.Invoice").condition("invoiceId", oib.invoiceId).useCache(false).one()?.statusId != 'InvoiceCancelled' }
+                            boolean isSalesPart = part.vendorPartyId && ec.entity.find("mantle.party.PartyRole")
+                                    .condition([partyId:part.vendorPartyId, roleTypeId:'OrgInternal']).useCache(true).count() > 0
+                            List<String> purchaseEditable = ['OrderBeingChanged', 'OrderOpen', 'OrderRequested', 'OrderProposed', 'OrderPlaced', 'OrderHold']
+                            boolean partTakesLines = isSalesPart ? (part.statusId == 'OrderOpen' && header.statusId == 'OrderOpen') :
+                                    (part.statusId in purchaseEditable || (header.orderTypeEnumId == 'OtPurchasedCommodity' && part.statusId == 'OrderSent'))
+                            cancelCut = !partBilled && partTakesLines
+                        }
+                    }
+                    if (!cancelCut) ec.message.addError("Order has already been invoiced. Cannot make changes to it.")
+                ]]></script>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
 
             <if condition="eecaOperation == 'delete'">
                 <service-call name="mantle.order.OrderServices.update#OrderPartTotal" in-map="context"/>

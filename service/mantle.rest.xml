@@ -491,8 +491,10 @@ along with this software (see the LICENSE.md file). If not, see
 
         <resource name="equipment"><method type="post">
             <service name="mantle.product.EquipmentServices.create#Equipment"/></method></resource>
+        <!-- sssonline #1194: an Account By (Asset.accountPoolId) is set only on an Incoming Inventory Shipment; the aspen
+             wrapper refuses one and otherwise calls receive#Asset -->
         <resource name="receive"><method type="post">
-            <service name="mantle.product.AssetServices.receive#Asset"/></method></resource>
+            <service name="sssonline.aspen.ReceivingBackstopServices.receive#AssetWithoutAccountBy"/></method></resource>
 
         <resource name="reservations">
             <method type="get"><entity name="mantle.product.issuance.AssetReservation" operation="list"/></method>
@@ -571,8 +573,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <resource name="issuances"><method type="get">
                         <entity name="mantle.product.issuance.AssetIssuance" operation="list"/></method></resource>
 
+                    <!-- sssonline #1194: same Account By refusal as assets/receive (aspen produce#Asset sets the run's) -->
                     <resource name="produce"><method type="post">
-                        <service name="mantle.product.AssetServices.receive#Asset"/></method></resource>
+                        <service name="sssonline.aspen.ReceivingBackstopServices.receive#AssetWithoutAccountBy"/></method></resource>
                     <resource name="receipts"><method type="get">
                         <entity name="mantle.product.receipt.AssetReceipt" operation="list"/></method></resource>
                 </id>

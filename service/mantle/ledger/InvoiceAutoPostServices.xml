@@ -127,6 +127,21 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- keep track of if we should put in the error journal or post -->
             <set field="useErrorJournal" from="false"/>
 
+            <!-- SSS (card #1200, Account Pool Overhaul, sweep 1): a receivable sales invoice credits every revenue line to
+                 the organization's Unassigned Revenue account at its net (its amount less the growers' absorbed charge
+                 shares weighed on it) and each absorbed (chargeCustomer='N') charge to its expense account for the
+                 growers' share; A/R is unchanged. The aspen plan says which lines and how much; it errors (rolling the post
+                 back) only on what it cannot post. Only the from-party (receivable) side of an InvoiceSales invoice; every
+                 other invoice (AP, payroll, credit memos) and the to-party side post exactly as before. -->
+            <set field="sweepPlan" from="null"/>
+            <if condition="fromPartyAcctgPreference != null &amp;&amp; invoice.invoiceTypeEnumId == 'InvoiceSales'">
+                <service-call name="sssonline.aspen.RevenueSweepServices.plan#InvoiceSweepOne" in-map="[invoiceId:invoiceId]"
+                        out-map="sweepPlanOut" out-map-add-to-existing="false"/>
+                <check-errors/>
+                <if condition="sweepPlanOut.isSweepInvoice &amp;&amp; sweepPlanOut.sweptLineSeqIdList">
+                    <set field="sweepPlan" from="sweepPlanOut"/></if>
+            </if>
+
             <!-- ==== create the main tx record(s) ==== -->
             <if condition="fromPartyAcctgPreference != null">
                 <service-call name="mantle.ledger.InvoiceAutoPostServices.get#InvoiceTypeTransType" out-map="fromInvoiceTypeTransTypeOut"
@@ -158,6 +173,15 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- ==== create entries for invoice items ==== -->
 
             <set field="invoiceTotal" from="0.0"/>
+            <!-- SSS (card #1242, Purchased Commodity Bill Posting): on a Purchased Commodity bill the aspen plan says how each
+                payable item posts; items it leaves out, and every other invoice, post exactly as before -->
+            <set field="pcBillPlan" from="null"/>
+            <if condition="toPartyAcctgPreference != null">
+                <service-call name="sssonline.aspen.PcBillPostingServices.plan#PcBillPosting" out-map="pcBillPlanOut" out-map-add-to-existing="false"
+                        in-map="[invoiceId:invoiceId, organizationPartyId:toAcctgTrans.organizationPartyId]"/>
+                <check-errors/>
+                <if condition="pcBillPlanOut.isPcBill"><set field="pcBillPlan" from="pcBillPlanOut"/></if>
+            </if>
             <iterate list="invoiceItemList" entry="invoiceItem">
                 <!-- skip adjustment items, handle later -->
                 <if condition="invoiceItem.isAdjustment == 'Y'"><continue/></if>
@@ -165,7 +189,21 @@ along with this software (see the LICENSE.md file). If not, see
                     receivable-only) entirely — no revenue entry, and the accumulated invoiceTotal here feeds the
                     balancing A/R entry so it must match get#InvoiceTotal's identical skip. The charge's real cost
                     posts through its payable invoice; posting this line too would double-count. -->
-                <if condition="invoiceItem.chargeCustomer == 'N'"><continue/></if>
+                <if condition="invoiceItem.chargeCustomer == 'N'">
+                    <!-- SSS (card #1200, sweep 1): the growers' share of an absorbed charge credits its expense account (its
+                         own GL override, else its item type's payable mapping) in the invoice's own transaction; the
+                         Unassigned credits of the lines it is weighed on are already reduced by the same amount -->
+                    <set field="sweepAbsorbedCredit" from="sweepPlan?.absorbedCreditMap?.get(invoiceItem.invoiceItemSeqId)"/>
+                    <if condition="sweepAbsorbedCredit &amp;&amp; sweepAbsorbedCredit.amount">
+                        <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
+                                in-map="[invoiceItemSeqId:invoiceItem.invoiceItemSeqId, productId:invoiceItem.productId,
+                                    description:invoiceItem.description, acctgTransId:fromAcctgTrans.acctgTransId, acctgTrans:fromAcctgTrans,
+                                    amount:(sweepAbsorbedCredit.amount as BigDecimal).abs(),
+                                    debitCreditFlag:((sweepAbsorbedCredit.amount as BigDecimal) &gt; 0 ? 'C' : 'D'),
+                                    glAccountTypeEnumId:sweepAbsorbedCredit.glAccountTypeEnumId, glAccountId:sweepAbsorbedCredit.glAccountId]"/>
+                    </if>
+                    <continue/>
+                </if>
                 <!-- calc and check item total -->
                 <!-- NOTE: for debits and credits to match on item entries vs invoice level AR/AP entry they must be rounded the same -->
                 <!-- NOTE: CurrencyRoundingMarker scale here may vary by currency, make configurable -->
@@ -324,15 +362,45 @@ along with this software (see the LICENSE.md file). If not, see
 
                         <if condition="!itemGlAccountId"><set field="useErrorJournal" from="true"/></if>
 
-                        <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                                in-map="entryCommonMap + [amount:itemTotal, acctgTransId:fromAcctgTrans.acctgTransId,
-                                    acctgTrans:fromAcctgTrans, debitCreditFlag:'C', glAccountTypeEnumId:itemGlAccountTypeEnumId,
-                                    glAccountId:itemGlAccountId]"/>
+                        <!-- SSS (card #1200, sweep 1): a revenue line credits Unassigned Revenue at its net instead of its
+                             revenue account (a negative net debits it, a zero net posts nothing); sales tax, fixed-asset sales
+                             and every non-sales invoice keep the standard entry -->
+                        <set field="sweepLineAbsorbed" from="(sweepPlan != null &amp;&amp; sweepPlan.sweptLineSeqIdList.contains(invoiceItem.invoiceItemSeqId)) ?
+                                ((sweepPlan.lineAbsorbedMap?.get(invoiceItem.invoiceItemSeqId) ?: 0.0) as BigDecimal) : null"/>
+                        <if condition="sweepLineAbsorbed != null"><then>
+                            <set field="sweepLineNet" from="itemTotal - sweepLineAbsorbed"/>
+                            <if condition="sweepLineNet != 0.0">
+                                <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
+                                        in-map="entryCommonMap + [amount:sweepLineNet.abs(), acctgTransId:fromAcctgTrans.acctgTransId,
+                                            acctgTrans:fromAcctgTrans, debitCreditFlag:(sweepLineNet &gt; 0 ? 'C' : 'D'),
+                                            glAccountTypeEnumId:'GatUnassignedRevenue', glAccountId:sweepPlan.unassignedGlAccountId]"/>
+                            </if>
+                        </then><else>
+                            <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
+                                    in-map="entryCommonMap + [amount:itemTotal, acctgTransId:fromAcctgTrans.acctgTransId,
+                                        acctgTrans:fromAcctgTrans, debitCreditFlag:'C', glAccountTypeEnumId:itemGlAccountTypeEnumId,
+                                        glAccountId:itemGlAccountId]"/>
+                        </else></if>
                     </if>
                 </if>
 
                 <!-- entry for to Party (purchase invoice) -->
-                <if condition="toPartyAcctgPreference != null">
+                <!-- SSS (card #1242): a planned PC bill item posts Unreceived Inventory and COGS (sum = itemTotal; AP entry unchanged) -->
+                <set field="pcItem" from="pcBillPlan != null ? pcBillPlan.itemPlanMap.get(invoiceItem.invoiceItemSeqId) : null"/>
+                <if condition="toPartyAcctgPreference != null &amp;&amp; pcItem != null"><then>
+                    <if condition="pcItem.unreceivedAmount">
+                        <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
+                                in-map="entryCommonMap + [amount:(pcItem.unreceivedAmount as BigDecimal).abs(), acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
+                                    debitCreditFlag:((pcItem.unreceivedAmount as BigDecimal) &gt; 0 ? 'D' : 'C'), glAccountTypeEnumId:'GatUnreceivedInventory',
+                                    glAccountId:pcBillPlan.unreceivedGlAccountId, orderId:pcItem.orderId, orderItemSeqId:pcItem.orderItemSeqId]"/>
+                    </if>
+                    <if condition="pcItem.cogsAmount">
+                        <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
+                                in-map="entryCommonMap + [amount:(pcItem.cogsAmount as BigDecimal).abs(), acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
+                                    debitCreditFlag:((pcItem.cogsAmount as BigDecimal) &gt; 0 ? 'D' : 'C'), glAccountTypeEnumId:'GatCogs',
+                                    glAccountId:pcBillPlan.cogsGlAccountId, orderId:pcItem.orderId, orderItemSeqId:pcItem.orderItemSeqId]"/>
+                    </if>
+                </then><else-if condition="toPartyAcctgPreference != null">
                     <!-- use InvoiceItem.overrideGlAccountId if specified -->
                     <set field="itemGlAccountId" from="invoiceItem.overrideGlAccountId"/>
 
@@ -370,7 +438,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
                             in-map="entryCommonMap + [amount:itemTotal, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
                                 debitCreditFlag:'D', glAccountTypeEnumId:itemGlAccountTypeEnumId, glAccountId:itemGlAccountId]"/>
-                </if>
+                </else-if></if>
             </iterate>
             <!-- ==== create balancing entry ==== -->
 

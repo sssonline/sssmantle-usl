@@ -504,7 +504,8 @@ class ReturnToResponseBasicFlow extends Specification {
                         toPartyId="ORG_ZIZI_RETAIL" finAccountTransTypeEnumId="FattWithdraw" reasonEnumId="FatrDisbursement"
                         amount="-7.77" entryDate="${effectiveTime}" acctgTransResultEnumId="AtrSuccess"
                         transactionDate="${effectiveTime}" postBalance="15.30" finAccountAuthId="55700" performedByUserId="EX_JOHN_DOE"/>
-                <acctgTrans acctgTransId="55708" otherPartyId="CustJqp" amountUomId="USD" isPosted="Y" acctgTransTypeEnumId="AttFinancialWithdrawal"
+                <!-- Aspen (#1200): the invoice's Revenue Allocation transaction takes 55708, so the ids after it move up one -->
+                <acctgTrans acctgTransId="55709" otherPartyId="CustJqp" amountUomId="USD" isPosted="Y" acctgTransTypeEnumId="AttFinancialWithdrawal"
                         glFiscalTypeEnumId="GLFT_ACTUAL" transactionDate="${effectiveTime}" organizationPartyId="ORG_ZIZI_RETAIL">
                     <entries acctgTransEntrySeqId="01" amount="7.77" glAccountId="258200000" reconcileStatusId="AterNot" isSummary="N" debitCreditFlag="C"/>
                     <entries acctgTransEntrySeqId="02" amount="7.77" glAccountId="251100000" reconcileStatusId="AterNot" isSummary="N" debitCreditFlag="D"/>
@@ -517,7 +518,7 @@ class ReturnToResponseBasicFlow extends Specification {
                         amountUomId="USD" paymentTypeEnumId="PtInvoicePayment" finAccountTransId="55701" amount="7.77"
                         reconcileStatusId="PmtrNot" acctgTransResultEnumId="AtrSuccess" finAccountAuthId="55700" statusId="PmntDelivered"
                         paymentInstrumentEnumId="PiFinancialAccount" toPartyId="ORG_ZIZI_RETAIL" orderId="55701" orderPartSeqId="01">
-                    <mantle.ledger.transaction.AcctgTrans acctgTransId="55709" otherPartyId="CustJqp" postedDate="${effectiveTime}"
+                    <mantle.ledger.transaction.AcctgTrans acctgTransId="55710" otherPartyId="CustJqp" postedDate="${effectiveTime}"
                             amountUomId="USD" isPosted="Y" acctgTransTypeEnumId="AttIncomingPayment" glFiscalTypeEnumId="GLFT_ACTUAL"
                             transactionDate="${effectiveTime}" organizationPartyId="ORG_ZIZI_RETAIL">
                         <entries acctgTransEntrySeqId="01" amount="7.77" glAccountId="121000000" reconcileStatusId="AterNot"

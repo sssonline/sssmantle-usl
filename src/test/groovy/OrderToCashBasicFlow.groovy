@@ -555,37 +555,38 @@ class OrderToCashBasicFlow extends Specification {
         refreshRetailSalesInvoiceIds()
         // NOTE: this has sequenced IDs so is sensitive to run order!
         List<String> dataCheckErrors = ec.entity.makeDataLoader().xmlText("""<entity-facade-xml>
-            <!-- AcctgTrans created for Finalized Invoice -->
+            <!-- AcctgTrans created for Finalized Invoice; Aspen (#1200): product, discount and shipping lines post to Unassigned
+                 Revenue (252900000) and Revenue Allocation transactions move each to its own account (tax lines are not swept) -->
             <acctgTrans acctgTransId="${retailSalesInvoiceAcctgTransId}" invoiceId="${retailSalesInvoiceId}" organizationPartyId="ORG_ZIZI_RETAIL" otherPartyId="CustJqp"
                     postedDate="${effectiveTime}" amountUomId="USD" isPosted="Y" acctgTransTypeEnumId="AttSalesInvoice" 
                     glFiscalTypeEnumId="GLFT_ACTUAL" transactionDate="${effectiveTime}">
-                <entries acctgTransEntrySeqId="01" amount="16.99" debitCreditFlag="C" glAccountId="411000000" productId="DEMO_1_1" 
+                <entries acctgTransEntrySeqId="01" amount="16.99" debitCreditFlag="C" glAccountId="252900000" productId="DEMO_1_1" 
                         description="Demo Product One-One" reconcileStatusId="AterNot" invoiceItemSeqId="01" isSummary="N" 
-                        glAccountTypeEnumId="GatSales" assetId="55400"/>
+                        glAccountTypeEnumId="GatUnassignedRevenue" assetId="55400"/>
                 <entries acctgTransEntrySeqId="02" amount="1.19" debitCreditFlag="C" glAccountId="411000000" 
                         description="Test Tax 7%" reconcileStatusId="AterNot" invoiceItemSeqId="02" isSummary="N" 
                         glAccountTypeEnumId="GatSales"/>
 
-                <entries acctgTransEntrySeqId="03" amount="31.08" debitCreditFlag="C" glAccountId="411000000" productId="DEMO_3_1" 
+                <entries acctgTransEntrySeqId="03" amount="31.08" debitCreditFlag="C" glAccountId="252900000" productId="DEMO_3_1" 
                         description="Demo Product Three-One" reconcileStatusId="AterNot" invoiceItemSeqId="03" isSummary="N" 
-                        glAccountTypeEnumId="GatSales" assetId="DEMO_3_1A"/>
-                <entries acctgTransEntrySeqId="04" amount="4.92" debitCreditFlag="D" glAccountId="411000000"
+                        glAccountTypeEnumId="GatUnassignedRevenue" assetId="DEMO_3_1A"/>
+                <entries acctgTransEntrySeqId="04" amount="4.92" debitCreditFlag="D" glAccountId="252900000"
                         description="Discount why? Because we love you." reconcileStatusId="AterNot" invoiceItemSeqId="04" isSummary="N" 
-                        glAccountTypeEnumId="GatSales"/>
+                        glAccountTypeEnumId="GatUnassignedRevenue"/>
                 <entries acctgTransEntrySeqId="05" amount="1.83" debitCreditFlag="C" glAccountId="411000000" 
                         description="Test Tax 7%" reconcileStatusId="AterNot" invoiceItemSeqId="05" isSummary="N" glAccountTypeEnumId="GatSales"/>
 
-                <entries acctgTransEntrySeqId="06" amount="60.6" debitCreditFlag="C" glAccountId="411000000" productId="DEMO_2_1" 
+                <entries acctgTransEntrySeqId="06" amount="60.6" debitCreditFlag="C" glAccountId="252900000" productId="DEMO_2_1" 
                         description="Demo Product Two-One" reconcileStatusId="AterNot" invoiceItemSeqId="06" isSummary="N" 
-                        glAccountTypeEnumId="GatSales" assetId="55500"/>
-                <entries acctgTransEntrySeqId="07" amount="6.7" debitCreditFlag="D" glAccountId="411000000"
+                        glAccountTypeEnumId="GatUnassignedRevenue" assetId="55500"/>
+                <entries acctgTransEntrySeqId="07" amount="6.7" debitCreditFlag="D" glAccountId="252900000"
                         description="Discount why? Because we love you." reconcileStatusId="AterNot" invoiceItemSeqId="07" isSummary="N" 
-                        glAccountTypeEnumId="GatSales"/>
+                        glAccountTypeEnumId="GatUnassignedRevenue"/>
                 <entries acctgTransEntrySeqId="08" amount="3.77" debitCreditFlag="C" glAccountId="411000000" 
                         description="Test Tax 7%" reconcileStatusId="AterNot" invoiceItemSeqId="08" isSummary="N" 
                         glAccountTypeEnumId="GatSales"/>
                 <!-- TODO PtPickAssembly acctgTransEntrySeqId="09" -->
-                <entries acctgTransEntrySeqId="10" amount="6.77" debitCreditFlag="C" glAccountId="441000000" 
+                <entries acctgTransEntrySeqId="10" amount="6.77" debitCreditFlag="C" glAccountId="252900000" 
                         description="Standard Shipping" reconcileStatusId="AterNot" invoiceItemSeqId="10" isSummary="N"/>
                 <entries acctgTransEntrySeqId="11" amount="170.61" debitCreditFlag="D" glAccountId="121000000" 
                         reconcileStatusId="AterNot" isSummary="N" glAccountTypeEnumId="GatAccountsReceivable"/>
@@ -613,13 +614,14 @@ class OrderToCashBasicFlow extends Specification {
                 resultBadExpire="N" resultBadCardNumber="N"/>
             <!-- don't validate these, allow any payment gateway: paymentGatewayConfigId="TEST_APPROVE" referenceNum="TEST" -->
 
-            <mantle.ledger.transaction.AcctgTrans acctgTransId="55505" acctgTransTypeEnumId="AttIncomingPayment"
+            <!-- Aspen (#1200): after the invoice's Revenue Allocation transactions (55505-55511) -->
+            <mantle.ledger.transaction.AcctgTrans acctgTransId="55512" acctgTransTypeEnumId="AttIncomingPayment"
                 organizationPartyId="ORG_ZIZI_RETAIL" transactionDate="${effectiveTime}" isPosted="Y"
                 glFiscalTypeEnumId="GLFT_ACTUAL" amountUomId="USD" otherPartyId="CustJqp"
                 paymentId="${setInfoOut.paymentId}"/>
-            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55505" acctgTransEntrySeqId="01" debitCreditFlag="C"
+            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55512" acctgTransEntrySeqId="01" debitCreditFlag="C"
                 amount="200.68" glAccountId="126000000" reconcileStatusId="AterNot" isSummary="N"/>
-            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55505" acctgTransEntrySeqId="02" debitCreditFlag="D"
+            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55512" acctgTransEntrySeqId="02" debitCreditFlag="D"
                 amount="200.68" glAccountId="111100000" reconcileStatusId="AterNot" isSummary="N"/>
         </entity-facade-xml>""").check()
         logger.info("validate Payment Accounting Transaction data check results: ")

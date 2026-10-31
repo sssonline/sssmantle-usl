@@ -666,19 +666,21 @@ class WorkPlanToCashBasicFlow extends Specification {
             <mantle.account.invoice.InvoiceItemAssoc invoiceItemAssocId="55901" invoiceId="${expInvResult.invoiceId}" invoiceItemSeqId="02"
                 toInvoiceId="${clientInvResult.invoiceId}" toInvoiceItemSeqId="06" invoiceItemAssocTypeEnumId="IiatBillThrough" quantity="1" amount="123.45"/>
 
+            <!-- Aspen (#1200): a receivable sales invoice posts its lines to Unassigned Revenue (252900000); Revenue Allocation
+                 transactions (55904-55908) move each line to its own account -->
             <mantle.ledger.transaction.AcctgTrans acctgTransId="55903" acctgTransTypeEnumId="AttSalesInvoice"
                 organizationPartyId="${vendorResult.partyId}" isPosted="Y" glFiscalTypeEnumId="GLFT_ACTUAL" amountUomId="USD"
                 otherPartyId="${clientResult.partyId}" invoiceId="${clientInvResult.invoiceId}"/>
             <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55903" acctgTransEntrySeqId="01" debitCreditFlag="C"
-                amount="120" glAccountId="412000000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="01"/>
+                amount="120" glAccountId="252900000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="01"/>
             <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55903" acctgTransEntrySeqId="02" debitCreditFlag="C"
-                amount="360" glAccountId="412000000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="02"/>
+                amount="360" glAccountId="252900000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="02"/>
             <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55903" acctgTransEntrySeqId="03" debitCreditFlag="C"
-                amount="90" glAccountId="412000000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="04"/>
+                amount="90" glAccountId="252900000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="04"/>
             <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55903" acctgTransEntrySeqId="04" debitCreditFlag="C"
-                amount="345.67" glAccountId="681100000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="05"/>
+                amount="345.67" glAccountId="252900000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="05"/>
             <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55903" acctgTransEntrySeqId="05" debitCreditFlag="C"
-                amount="123.45" glAccountId="681100000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="06"/>
+                amount="123.45" glAccountId="252900000" reconcileStatusId="AterNot" isSummary="N" invoiceItemSeqId="06"/>
             <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55903" acctgTransEntrySeqId="06" debitCreditFlag="D"
                 amount="1,039.12" glAccountTypeEnumId="GatAccountsReceivable" glAccountId="121000000" reconcileStatusId="AterNot" isSummary="N"/>
 
@@ -706,12 +708,13 @@ class WorkPlanToCashBasicFlow extends Specification {
                 paymentId="${clientPmtResult.paymentId}" invoiceId="${clientInvResult.invoiceId}"
                 amountApplied="1,039.12" appliedDate="${startYear + '-11-12 12:00:00'}"/>
 
-            <mantle.ledger.transaction.AcctgTrans acctgTransId="55904" acctgTransTypeEnumId="AttIncomingPayment"
+            <!-- Aspen (#1200): after the five Revenue Allocation transactions -->
+            <mantle.ledger.transaction.AcctgTrans acctgTransId="55909" acctgTransTypeEnumId="AttIncomingPayment"
                 organizationPartyId="${vendorResult.partyId}" isPosted="Y" glFiscalTypeEnumId="GLFT_ACTUAL" amountUomId="USD"
                 otherPartyId="${clientResult.partyId}" paymentId="${clientPmtResult.paymentId}"/>
-            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55904" acctgTransEntrySeqId="01" debitCreditFlag="C"
+            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55909" acctgTransEntrySeqId="01" debitCreditFlag="C"
                 amount="1,039.12" glAccountId="121000000" reconcileStatusId="AterNot" isSummary="N"/>
-            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55904" acctgTransEntrySeqId="02" debitCreditFlag="D"
+            <mantle.ledger.transaction.AcctgTransEntry acctgTransId="55909" acctgTransEntrySeqId="02" debitCreditFlag="D"
                 amount="1,039.12" glAccountId="111100000" reconcileStatusId="AterNot" isSummary="N"/>
 
         </entity-facade-xml>""").check()

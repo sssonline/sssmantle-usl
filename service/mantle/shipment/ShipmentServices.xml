@@ -1679,6 +1679,13 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find entity-name="mantle.shipment.ShipmentItemDetail" list="shipmentItemDetailList">
                 <econdition field-name="shipmentId"/><order-by field-name="productId"/></entity-find>
+            <!-- #1211 Other Incoming Shipments Refuse Commodity Products: check every item first, so one commodity item refuses
+                 the whole call and nothing is received or delivered -->
+            <if condition="shipmentItemDetailList">
+                <service-call name="sssonline.aspen.ReceivingServices.check#ShipmentProductNotCommodity" out-map-add-to-existing="false"
+                        in-map="[productIdList:shipmentItemDetailList.collect { it.productId }.unique()]"/>
+                <check-errors/>
+            </if>
             <iterate list="shipmentItemDetailList" entry="sid">
                 <set field="quantityRemaining" from="sid.quantity - (sid.quantityAcceptedTotal ?: 0) - (sid.quantityRejectedTotal ?: 0)"/>
 
@@ -1711,6 +1718,13 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <if condition="quantityAccepted &lt; 0.0"><return error="true" message="Quantity Accepted may not be negative"/></if>
             <if condition="quantityRejected != null &amp;&amp; quantityRejected &lt; 0.0"><return error="true" message="Quantity Rejected may not be negative"/></if>
+
+            <!-- #1211 Other Incoming Shipments Refuse Commodity Products: a product that belongs to a commodity on the receipt
+                 date is sellable inventory and is received only on Incoming Inventory (which sets Grower, Block/Ranch, Crop Year
+                 and Account By); refused before anything is written, for every caller (purchase-order shipments included) -->
+            <service-call name="sssonline.aspen.ReceivingServices.check#ShipmentProductNotCommodity" out-map-add-to-existing="false"
+                    in-map="[productId:productId, asOfDate:receivedDate]"/>
+            <check-errors/>
 
             <if condition="!facilityId">
                 <entity-find entity-name="mantle.shipment.ShipmentRouteSegment" list="shipmentRouteSegmentList">
