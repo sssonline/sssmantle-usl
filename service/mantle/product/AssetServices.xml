@@ -820,6 +820,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="partyId" from="organizationPartyId"/>
                 <field-map field-name="roleTypeId" value="OrgInternal"/>
             </entity-find-one>
+            <!-- SSS customization (card 1295): a sales line with its own Ship From (OrderItem.facilityId) reserves there
+                 instead of at the part's Ship From. Direct-ship lines keep the part's (their reservation is cleared at shipment). -->
+            <if condition="orgPartyRole != null &amp;&amp; orderItem?.facilityId &amp;&amp; orderItem.isDirectShip != 'Y' &amp;&amp; orderItem.facilityId != inventoryFacilityId">
+                <set field="inventoryFacilityId" from="orderItem.facilityId"/>
+                <entity-find-one entity-name="mantle.facility.Facility" value-field="inventoryFacility" cache="true">
+                    <field-map field-name="facilityId" from="inventoryFacilityId"/></entity-find-one>
+                <set field="assetAllowOtherOwner" from="inventoryFacility?.assetAllowOtherOwner"/>
+            </if>
             <if condition="productStore == null &amp;&amp; orgPartyRole == null">
                 <if condition="forceReserve"><then>
                     <log message="Reserving inventory for order ${orderId} item ${orderItemSeqId} with no productStoreId and vendor is not OrgInternal (forceReserve is true)"/>
@@ -851,6 +859,14 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- check and lock individual Asset records -->
             <set field="lockedAssetList" from="[]"/>
             <set field="checkQuantityRemaining" from="quantityRemaining"/>
+            <!-- SSS customization (card 1312): a virtual product (aspen Product.virtualProduct = Y) has no stock of its own; its
+                 line never reserves a tag (explicit or matched) and holds its whole quantity on the shortfall placeholder at the
+                 line's Ship From. Real tags are chosen at shipment time. -->
+            <if condition="product != null &amp;&amp; ec.entity.getEntityDefinition('mantle.product.Product').isField('virtualProduct') &amp;&amp; product.virtualProduct == 'Y'">
+                <set field="checkQuantityRemaining" from="0.0"/>
+                <set field="assetId" from="null"/>
+                <set field="assetIdList" from="null"/>
+            </if>
 
             <!-- check/lock explicit assetIds -->
             <set field="explicitAssetIdList" from="[]"/>
@@ -2024,6 +2040,23 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem"/>
                 <!-- get productId from OrderItem -->
                 <set field="productId" from="orderItem.productId"/>
+                <!-- SSS customization (card 1295): a multi-stop sales shipment picks each line at its own Ship From
+                     (OrderItem.facilityId, else its part's), not at the first route segment's origin; only when the shipment
+                     has a segment starting there, so a single-segment shipment of any type is unchanged -->
+                <if condition="orderItem != null &amp;&amp; orderItem.isDirectShip != 'Y' &amp;&amp; facilityId">
+                    <set field="lineShipFromFacId" from="orderItem.facilityId"/>
+                    <if condition="!lineShipFromFacId">
+                        <entity-find-one entity-name="mantle.order.OrderPart" value-field="lineShipFromPart">
+                            <field-map field-name="orderId" from="orderItem.orderId"/>
+                            <field-map field-name="orderPartSeqId" from="orderItem.orderPartSeqId"/></entity-find-one>
+                        <set field="lineShipFromFacId" from="lineShipFromPart?.facilityId"/>
+                    </if>
+                    <if condition="lineShipFromFacId &amp;&amp; lineShipFromFacId != facilityId">
+                        <entity-find-count entity-name="mantle.shipment.ShipmentRouteSegment" count-field="lineStopSegCount">
+                            <econdition field-name="shipmentId"/><econdition field-name="originFacilityId" from="lineShipFromFacId"/></entity-find-count>
+                        <if condition="lineStopSegCount &gt; 0"><set field="facilityId" from="lineShipFromFacId"/></if>
+                    </if>
+                </if>
 
                 <!-- if no facilityId look at OrderPart -->
                 <if condition="!facilityId">

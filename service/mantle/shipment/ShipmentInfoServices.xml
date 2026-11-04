@@ -913,8 +913,14 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="reservedAssetIds" from="assetResList*.assetId"/>
                     <set field="curQuantityNotHandled" from="(sis.quantityNotHandled ?: 0.0) * (shipmentProduct.qtyMultiplier ?: 1.0)"/>
 
+                    <!-- SSS customization (card 1311): a virtual product's only reservation is its dummy (a shortfall placeholder with
+                         nothing on hand, no location); it is never a place to pick from, so the pick sheet leaves it out -->
+                    <entity-find-one entity-name="mantle.product.Product" value-field="pickSheetProduct" cache="true">
+                        <field-map field-name="productId" from="shipmentProduct.productId"/></entity-find-one>
+                    <set field="pickSheetVirtual" from="pickSheetProduct != null &amp;&amp; ec.entity.getEntityDefinition('mantle.product.Product').isField('virtualProduct') &amp;&amp; pickSheetProduct.virtualProduct == 'Y'"/>
                     <iterate list="assetResList" entry="assetRes">
                         <set field="resAsset" from="assetRes.asset"/>
+                        <if condition="pickSheetVirtual &amp;&amp; (resAsset?.quantityOnHandTotal ?: 0.0) &lt;= 0.0"><continue/></if>
                         <set field="assetLocKey" from="[facilityId:resAsset.facilityId, locationSeqId:resAsset.locationSeqId, lotId:resAsset.lotId]"/>
                         <set field="facLoc" from="resAsset.location"/>
                         <set field="geoPoint" from="facLoc?.geoPoint"/>

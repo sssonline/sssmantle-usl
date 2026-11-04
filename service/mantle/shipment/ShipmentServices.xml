@@ -1217,7 +1217,19 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="assetId">
                 <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true"/>
                 <if condition="asset == null"><return error="true" message="Asset ${assetId} not found, not packing"/></if>
-                <if condition="shipmentItemSource.productId != asset.productId">
+                <!-- SSS customization (card 1311): a virtual line (aspen Product.virtualProduct = Y) takes any matching real tag
+                     (same commodity, Finished, features include the virtual's: VirtualProductServices.get#VirtualProductMatches);
+                     its direct-ship stand-in may carry the virtual product itself -->
+                <entity-find-one entity-name="mantle.product.Product" value-field="sisProduct" cache="true">
+                    <field-map field-name="productId" from="shipmentItemSource.productId"/></entity-find-one>
+                <set field="isVirtualSis" from="sisProduct != null &amp;&amp; ec.entity.getEntityDefinition('mantle.product.Product').isField('virtualProduct') &amp;&amp; sisProduct.virtualProduct == 'Y'"/>
+                <if condition="isVirtualSis &amp;&amp; shipmentItemSource.productId != asset.productId &amp;&amp; asset.assetTypeEnumId != 'AstTpDirectShip'">
+                    <service-call name="sssonline.aspen.VirtualProductServices.get#VirtualProductMatches" out-map="sisMatchOut" out-map-add-to-existing="false"
+                            in-map="[productId:shipmentItemSource.productId]"/>
+                    <if condition="!(sisMatchOut.matchProductIdList ?: []).contains(asset.productId)">
+                        <return error="true" message="Tag ${asset.pseudoId ?: assetId} (product ${asset.productId}) doesn't match the virtual product ${shipmentItemSource.productId} on this line, not packing"/></if>
+                </if>
+                <if condition="!isVirtualSis &amp;&amp; shipmentItemSource.productId != asset.productId">
                     <return error="true" message="Asset product ${asset.productId} is not the same as shipment item product ${shipmentItemSource.productId}, not packing"/></if>
                 <if condition="quantity &gt; asset.quantityOnHandTotal">
                     <return error="true" message="Quantity specified (${quantity}) is greater than asset [${assetId}] quantity on hand (${asset.quantityOnHandTotal}), not packing"/></if>
@@ -1298,12 +1310,42 @@ along with this software (see the LICENSE.md file). If not, see
                         quantityRemaining : asset.quantityOnHandTotal"/>
                 <set field="quantityRemaining" from="quantityRemaining &gt; quantityToIssue ? (quantityRemaining - quantityToIssue) : 0.0"/>
 
+                <!-- SSS customization (card 1310): a virtual line bills one invoice item per real product, so the source row's
+                     single invoice stamp is not this tag's link; the link is resolved for the tag's own product (none: no link) -->
+                <set field="issueInvoiceId" from="shipmentItemSource.invoiceId"/>
+                <set field="issueInvoiceItemSeqId" from="shipmentItemSource.invoiceItemSeqId"/>
+                <if condition="isVirtualSis &amp;&amp; shipmentItemSource.orderId &amp;&amp; ec.service.isServiceDefined('sssonline.basalt.ShipmentServices.resolve#IssuanceInvoiceLink')">
+                    <service-call name="sssonline.basalt.ShipmentServices.resolve#IssuanceInvoiceLink" out-map="virtualLinkOut" out-map-add-to-existing="false"
+                            in-map="[orderId:shipmentItemSource.orderId, orderItemSeqId:shipmentItemSource.orderItemSeqId,
+                                shipmentId:shipmentItemSource.shipmentId, assetId:assetId]"/>
+                    <set field="issueInvoiceId" from="virtualLinkOut.invoiceId"/>
+                    <set field="issueInvoiceItemSeqId" from="virtualLinkOut.invoiceItemSeqId"/>
+                </if>
                 <!-- do a non-reservation asset issuance -->
                 <service-call name="mantle.product.AssetServices.issue#Asset"
                         in-map="[shipmentId:shipmentItemSource.shipmentId, shipmentItemSourceId:shipmentItemSourceId,
                             quantity:quantityToIssue, issuedDate:packDate, assetId:assetId,
                             orderId:shipmentItemSource.orderId, orderItemSeqId:shipmentItemSource.orderItemSeqId,
-                            invoiceId:shipmentItemSource.invoiceId, invoiceItemSeqId:shipmentItemSource.invoiceItemSeqId]"/>
+                            invoiceId:issueInvoiceId, invoiceItemSeqId:issueInvoiceItemSeqId]"/>
+
+                <!-- SSS customization (card 1311): the picked quantity comes off the virtual line's dummy (its shortfall
+                     placeholder reservation) in the same step, so it is never counted twice; unpicking re-reserves it -->
+                <if condition="isVirtualSis &amp;&amp; shipmentItemSource.orderId">
+                    <set field="dummyToReduce" from="quantityToIssue"/>
+                    <entity-find entity-name="mantle.product.issuance.AssetReservation" list="dummyResList">
+                        <econdition field-name="orderId" from="shipmentItemSource.orderId"/>
+                        <econdition field-name="orderItemSeqId" from="shipmentItemSource.orderItemSeqId"/>
+                        <econdition field-name="productId" from="shipmentItemSource.productId"/>
+                        <econdition field-name="quantityNotIssued" operator="greater" from="0.0"/>
+                        <order-by field-name="assetId"/>
+                    </entity-find>
+                    <iterate list="dummyResList" entry="dummyRes">
+                        <if condition="dummyToReduce &lt;= 0.0"><break/></if>
+                        <service-call name="mantle.product.AssetServices.reduce#AssetReservation" out-map="dummyReduceOut" out-map-add-to-existing="false"
+                                in-map="[assetReservationId:dummyRes.assetReservationId, quantityToDeduct:dummyToReduce]"/>
+                        <set field="dummyToReduce" from="dummyToReduce - (dummyReduceOut.quantityDeducted ?: 0.0)"/>
+                    </iterate>
+                </if>
             </if>
 
             <!-- if quantityRemaining (no reservations or specified assetId) use logic similar to reserve to find Assets to pack/issue -->

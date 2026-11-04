@@ -484,6 +484,9 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="assetId"/></member-entity>
         <alias-all entity-alias="AST"/>
         <alias-all entity-alias="ASI"><exclude field="productId"/><exclude field="facilityId"/></alias-all>
+        <!-- SSS customization (card 1311): the issuance's own product. A virtual sales line's issuance keeps the line's
+             (virtual) product while the tag is real, so productId (the tag's) and issuanceProductId differ there. -->
+        <alias name="issuanceProductId" entity-alias="ASI" field="productId"/>
     </view-entity>
     <view-entity entity-name="AssetAndIssuanceCost" package="mantle.product.issuance">
         <description>This is used as a sub-select as a member of the OrderItemSalesSummary and InvoiceItemSalesSummary view entities, may be useful for other finds as well</description>
