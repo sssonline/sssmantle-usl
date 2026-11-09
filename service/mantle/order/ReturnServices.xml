@@ -1202,7 +1202,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <entity-find entity-name="mantle.order.return.ReturnItem" list="returnItemList">
-                <econdition field-name="returnId"/></entity-find>
+                <econdition field-name="returnId"/><order-by field-name="returnItemSeqId"/></entity-find>
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="allItemSisList">
                 <econdition field-name="returnId"/></entity-find>
 
