@@ -317,78 +317,57 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="pseudoId" entity-alias="FRMP"/>
         <alias name="organizationName" entity-alias="FRMO"/>
 
+        <!-- #1360: buckets count DAYS PAST the chosen date (Due Date or Invoice Date) backward from today, so each
+             invoice lands in the column its header names. With S0 = Current and Sk = Current + bucket1..bucketk:
+             Current = date >= today - S0; period k = date BETWEEN today - Sk AND today - (S(k-1) + 1);
+             Remaining = date < today - S4. A NULL date matches no bucket (counted in the total only). -->
+        <!-- CURRENT: not yet past due beyond the Current days (date on or after today - Current) -->
         <alias name="currentDue" type="currency-amount" function="sum">
-            <complex-alias expression="${(
-          [
-            'postgres': 'CASE WHEN (DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &lt;= (CURRENT_DATE + ' + (currentBucket ?: 0) + ')) THEN INV.UNPAID_TOTAL ELSE 0 END',
-            'db2i'    : 'CASE WHEN (DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &lt;= (CURRENT_DATE + ' + (currentBucket ?: 0) + ' DAYS)) THEN INV.UNPAID_TOTAL ELSE 0 END',
-            'h2'      : 'CASE WHEN (CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) &lt;= DATEADD(DAY, ' + (currentBucket ?: 0) + ', CURRENT_DATE)) THEN INV.UNPAID_TOTAL ELSE 0 END'
-          ])[dbConfName] ?: 'CASE WHEN (DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &lt;= (CURRENT_DATE + ' + (currentBucket ?: 0) + ')) THEN INV.UNPAID_TOTAL ELSE 0 END'}"/>
+            <complex-alias expression="${
+              dbConfName == 'db2i' ? 'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &gt;= ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0)) + ' DAYS)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              dbConfName == 'h2' ? 'CASE WHEN ' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' &gt;= ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0)) + ', CURRENT_DATE)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &gt;= ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0)) + ')' + ' THEN INV.UNPAID_TOTAL ELSE 0 END'
+            }"/>
         </alias>
-
-        <!-- PERIOD 1: (today + currentBucket + 1) .. (today + currentBucket + bucket1) -->
+        <!-- PERIOD 1: Current+1 .. Current+bucket1 days past the date -->
         <alias name="period1" type="currency-amount" function="sum">
-            <complex-alias expression="${(
-          dbConfName == 'postgres' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'db2i' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ' DAYS) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'h2' ?
-            'CASE WHEN CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ', CURRENT_DATE) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END'
-        )}"/>
+            <complex-alias expression="${
+              dbConfName == 'db2i' ? 'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0)) + 1) + ' DAYS)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              dbConfName == 'h2' ? 'CASE WHEN ' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0)) + 1) + ', CURRENT_DATE)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0)) + 1) + ')' + ' THEN INV.UNPAID_TOTAL ELSE 0 END'
+            }"/>
         </alias>
-
-        <!-- PERIOD 2 -->
+        <!-- PERIOD 2: next bucket2 days past -->
         <alias name="period2" type="currency-amount" function="sum">
-            <complex-alias expression="${(
-          dbConfName == 'postgres' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'db2i' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ' DAYS) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'h2' ?
-            'CASE WHEN CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ', CURRENT_DATE) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END'
-        )}"/>
+            <complex-alias expression="${
+              dbConfName == 'db2i' ? 'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0)) + 1) + ' DAYS)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              dbConfName == 'h2' ? 'CASE WHEN ' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0) + (bucket1 ?: 0)) + 1) + ', CURRENT_DATE)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0)) + 1) + ')' + ' THEN INV.UNPAID_TOTAL ELSE 0 END'
+            }"/>
         </alias>
-
-        <!-- PERIOD 3 -->
+        <!-- PERIOD 3: next bucket3 days past -->
         <alias name="period3" type="currency-amount" function="sum">
-            <complex-alias expression="${(
-          dbConfName == 'postgres' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'db2i' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ' DAYS) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'h2' ?
-            'CASE WHEN CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ', CURRENT_DATE) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END'
-        )}"/>
+            <complex-alias expression="${
+              dbConfName == 'db2i' ? 'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + 1) + ' DAYS)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              dbConfName == 'h2' ? 'CASE WHEN ' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + 1) + ', CURRENT_DATE)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + 1) + ')' + ' THEN INV.UNPAID_TOTAL ELSE 0 END'
+            }"/>
         </alias>
-
-        <!-- PERIOD 4 -->
+        <!-- PERIOD 4: next bucket4 days past -->
         <alias name="period4" type="currency-amount" function="sum">
-            <complex-alias expression="${(
-          dbConfName == 'postgres' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'db2i' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ' DAYS) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'h2' ?
-            'CASE WHEN CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ', CURRENT_DATE) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END'
-        )}"/>
+            <complex-alias expression="${
+              dbConfName == 'db2i' ? 'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + 1) + ' DAYS)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              dbConfName == 'h2' ? 'CASE WHEN ' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + 1) + ', CURRENT_DATE)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + 1) + ')' + ' THEN INV.UNPAID_TOTAL ELSE 0 END'
+            }"/>
         </alias>
-
-        <!-- REMAINING: > upper bound of Period 4 -->
+        <!-- REMAINING: older than every bucket -->
         <alias name="periodRemaining" type="currency-amount" function="sum">
-            <complex-alias expression="${(
-          dbConfName == 'postgres' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') > (CURRENT_DATE + ' + ((currentBucket ?: 0)+(bucket1 ?: 0)+(bucket2 ?: 0)+(bucket3 ?: 0)+(bucket4 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'db2i' ?
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') > (CURRENT_DATE + ' + ((currentBucket ?: 0)+(bucket1 ?: 0)+(bucket2 ?: 0)+(bucket3 ?: 0)+(bucket4 ?: 0)) + ' DAYS) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-          dbConfName == 'h2' ?
-            'CASE WHEN CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) > DATEADD(DAY, ' + ((currentBucket ?: 0)+(bucket1 ?: 0)+(bucket2 ?: 0)+(bucket3 ?: 0)+(bucket4 ?: 0)) + ', CURRENT_DATE) THEN INV.UNPAID_TOTAL ELSE 0 END' :
-            'CASE WHEN DATE(INV.' + (dateField ?: 'DUE_DATE') + ') > (CURRENT_DATE + ' + ((currentBucket ?: 0)+(bucket1 ?: 0)+(bucket2 ?: 0)+(bucket3 ?: 0)+(bucket4 ?: 0)) + ') THEN INV.UNPAID_TOTAL ELSE 0 END'
-        )}"/>
+            <complex-alias expression="${
+              dbConfName == 'db2i' ? 'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &lt; ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ' DAYS)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              dbConfName == 'h2' ? 'CASE WHEN ' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' &lt; ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ', CURRENT_DATE)' + ' THEN INV.UNPAID_TOTAL ELSE 0 END' :
+              'CASE WHEN ' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &lt; ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ')' + ' THEN INV.UNPAID_TOTAL ELSE 0 END'
+            }"/>
         </alias>
 
         <!-- Grand total -->
@@ -439,105 +418,82 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="supplierRoleType" field="roleTypeId" entity-alias="RGM" function="min"/>
         <alias name="ownerPartyId" entity-alias="TOP"/>
 
-        <!-- CURRENT: dateField_date <= today + currentBucket -->
+        <!-- #1360: buckets count DAYS PAST the chosen date (Due Date or Invoice Date) backward from today, so each
+             invoice lands in the column its header names. With S0 = Current and Sk = Current + bucket1..bucketk:
+             Current = date >= today - S0; period k = date BETWEEN today - Sk AND today - (S(k-1) + 1);
+             Remaining = date < today - S4. A NULL date matches no bucket (counted in the total only). -->
+        <!-- CURRENT: not yet past due beyond the Current days (date on or after today - Current) -->
         <alias name="currentDue" type="currency-amount">
             <case>
                 <when expression="${
-              ([
-                'postgres': '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &lt;= (CURRENT_DATE + ' + (currentBucket ?: 0) + '))',
-                'db2i'    : '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &lt;= (CURRENT_DATE + ' + (currentBucket ?: 0) + ' DAYS))',
-                'h2'      : '(CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) &lt;= DATEADD(DAY, ' + (currentBucket ?: 0) + ', CURRENT_DATE))'
-              ])[dbConfName] ?: '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &lt;= (CURRENT_DATE + ' + (currentBucket ?: 0) + '))'
+              dbConfName == 'db2i' ? '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &gt;= ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0)) + ' DAYS)' + ')' :
+              dbConfName == 'h2' ? '(' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' &gt;= ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0)) + ', CURRENT_DATE)' + ')' :
+              '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &gt;= ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0)) + ')' + ')'
             }">
                     <complex-alias expression="INV.UNPAID_TOTAL"/>
                 </when>
                 <else><complex-alias expression="0"/></else>
             </case>
         </alias>
-
-        <!-- PERIOD 1: (today + currentBucket + 1) .. (today + currentBucket + bucket1) -->
+        <!-- PERIOD 1: Current+1 .. Current+bucket1 days past the date -->
         <alias name="period1" type="currency-amount">
             <case>
                 <when expression="${
-              dbConfName == 'postgres' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + '))' :
-              dbConfName == 'db2i' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ' DAYS))' :
-              dbConfName == 'h2' ?
-                '(CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ', CURRENT_DATE))' :
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + '))'
+              dbConfName == 'db2i' ? '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0)) + 1) + ' DAYS)' + ')' :
+              dbConfName == 'h2' ? '(' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0)) + 1) + ', CURRENT_DATE)' + ')' :
+              '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0)) + 1) + ')' + ')'
             }">
                     <complex-alias expression="INV.UNPAID_TOTAL"/>
                 </when>
                 <else><complex-alias expression="0"/></else>
             </case>
         </alias>
-
-        <!-- PERIOD 2 -->
+        <!-- PERIOD 2: next bucket2 days past -->
         <alias name="period2" type="currency-amount">
             <case>
                 <when expression="${
-              dbConfName == 'postgres' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + '))' :
-              dbConfName == 'db2i' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ' DAYS))' :
-              dbConfName == 'h2' ?
-                '(CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ', CURRENT_DATE))' :
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + '))'
+              dbConfName == 'db2i' ? '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0)) + 1) + ' DAYS)' + ')' :
+              dbConfName == 'h2' ? '(' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0) + (bucket1 ?: 0)) + 1) + ', CURRENT_DATE)' + ')' :
+              '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0)) + 1) + ')' + ')'
             }">
                     <complex-alias expression="INV.UNPAID_TOTAL"/>
                 </when>
                 <else><complex-alias expression="0"/></else>
             </case>
         </alias>
-
-        <!-- PERIOD 3 -->
+        <!-- PERIOD 3: next bucket3 days past -->
         <alias name="period3" type="currency-amount">
             <case>
                 <when expression="${
-              dbConfName == 'postgres' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + '))' :
-              dbConfName == 'db2i' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ' DAYS))' :
-              dbConfName == 'h2' ?
-                '(CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ', CURRENT_DATE))' :
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + '))'
+              dbConfName == 'db2i' ? '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + 1) + ' DAYS)' + ')' :
+              dbConfName == 'h2' ? '(' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + 1) + ', CURRENT_DATE)' + ')' :
+              '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0)) + 1) + ')' + ')'
             }">
                     <complex-alias expression="INV.UNPAID_TOTAL"/>
                 </when>
                 <else><complex-alias expression="0"/></else>
             </case>
         </alias>
-
-        <!-- PERIOD 4 -->
+        <!-- PERIOD 4: next bucket4 days past -->
         <alias name="period4" type="currency-amount">
             <case>
                 <when expression="${
-              dbConfName == 'postgres' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + '))' :
-              dbConfName == 'db2i' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ' DAYS) AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ' DAYS))' :
-              dbConfName == 'h2' ?
-                '(CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) BETWEEN DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ', CURRENT_DATE) AND DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ', CURRENT_DATE))' :
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') BETWEEN (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + 1) + ') AND (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + '))'
+              dbConfName == 'db2i' ? '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ' DAYS)' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + 1) + ' DAYS)' + ')' :
+              dbConfName == 'h2' ? '(' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' BETWEEN ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ', CURRENT_DATE)' + ' AND ' + 'DATEADD(DAY, -' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + 1) + ', CURRENT_DATE)' + ')' :
+              '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' BETWEEN ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ')' + ' AND ' + '(CURRENT_DATE - ' + (((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0)) + 1) + ')' + ')'
             }">
                     <complex-alias expression="INV.UNPAID_TOTAL"/>
                 </when>
                 <else><complex-alias expression="0"/></else>
             </case>
         </alias>
-
-        <!-- REMAINING: > upper bound of Period 4 -->
+        <!-- REMAINING: older than every bucket -->
         <alias name="periodRemaining" type="currency-amount">
             <case>
                 <when expression="${
-              dbConfName == 'postgres' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &gt; (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + '))' :
-              dbConfName == 'db2i' ?
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &gt; (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ' DAYS))' :
-              dbConfName == 'h2' ?
-                '(CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE) &gt; DATEADD(DAY, ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ', CURRENT_DATE))' :
-                '(DATE(INV.' + (dateField ?: 'DUE_DATE') + ') &gt; (CURRENT_DATE + ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + '))'
+              dbConfName == 'db2i' ? '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &lt; ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ' DAYS)' + ')' :
+              dbConfName == 'h2' ? '(' + 'CAST(INV.' + (dateField ?: 'DUE_DATE') + ' AS DATE)' + ' &lt; ' + 'DATEADD(DAY, -' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ', CURRENT_DATE)' + ')' :
+              '(' + 'DATE(INV.' + (dateField ?: 'DUE_DATE') + ')' + ' &lt; ' + '(CURRENT_DATE - ' + ((currentBucket ?: 0) + (bucket1 ?: 0) + (bucket2 ?: 0) + (bucket3 ?: 0) + (bucket4 ?: 0)) + ')' + ')'
             }">
                     <complex-alias expression="INV.UNPAID_TOTAL"/>
                 </when>
