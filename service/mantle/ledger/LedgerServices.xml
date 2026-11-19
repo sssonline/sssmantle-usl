@@ -1256,11 +1256,18 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="fromTimestamp" from="periodInfo.fromTimestamp"/>
             <set field="thruTimestamp" from="periodInfo.thruTimestamp"/>
 
-            <!-- get or create the next TimePeriod (gets nextTimePeriodId, nextTimePeriod); always set its begin balance from this period's end balance -->
-            <service-call name="mantle.party.TimeServices.get#NextTimePeriod" out-map="context" in-map="[timePeriodId:timePeriodId]"/>
+            <!-- get the next TimePeriod, if there is one; its begin balance is always set from this period's end balance.
+                sssonline (#1357 follow-up): the result goes to its own map, never to the context. A period with no next
+                one returns no id, and with out-map="context" that left nextTimePeriodId as it was: empty here (so the list
+                below held a null period id), or in recalculate#GlAccountOrgSummaries the id of the period processed before,
+                whose balances then took this period's ending balance, even another organization's. With no next period
+                nothing is carried forward. -->
+            <service-call name="mantle.party.TimeServices.get#NextTimePeriod" out-map="nextPeriodOut" out-map-add-to-existing="false"
+                    in-map="[timePeriodId:timePeriodId]"/>
+            <set field="nextTimePeriodId" from="nextPeriodOut?.nextTimePeriodId"/>
 
             <!-- get any existing subsequent time periods to update those as well (unlike next get only, no create) -->
-            <set field="subsequentPeriodIds" from="[nextTimePeriodId]"/>
+            <set field="subsequentPeriodIds" from="nextTimePeriodId ? [nextTimePeriodId] : []"/>
             <set field="curSubPeriodId" from="nextTimePeriodId"/>
             <script>
             while (curSubPeriodId) {
@@ -1646,13 +1653,16 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="fromTimestamp" from="periodInfo.fromTimestamp"/>
                 <set field="thruTimestamp" from="periodInfo.thruTimestamp"/>
 
-                <!-- get or create the next TimePeriod (gets nextTimePeriodId, nextTimePeriod); always set its begin balance
-                    from this period's end balance -->
-                <service-call name="mantle.party.TimeServices.get#NextTimePeriod" out-map="context"
+                <!-- get the next TimePeriod, if there is one; its begin balance is always set from this period's end
+                    balance. sssonline (#1357 follow-up): into its own map, never the context, so a period with no next one
+                    carries nothing forward instead of reusing the next period of the period before it in this loop (see
+                    recalculate#GlAccountOrgTimePeriodAmounts) -->
+                <service-call name="mantle.party.TimeServices.get#NextTimePeriod" out-map="nextPeriodOut" out-map-add-to-existing="false"
                               in-map="[timePeriodId:timePeriodId]"/>
+                <set field="nextTimePeriodId" from="nextPeriodOut?.nextTimePeriodId"/>
 
                 <!-- get any existing subsequent time periods to update those as well (unlike next get only, no create) -->
-                <set field="subsequentPeriodIds" from="[nextTimePeriodId]"/>
+                <set field="subsequentPeriodIds" from="nextTimePeriodId ? [nextTimePeriodId] : []"/>
                 <set field="curSubPeriodId" from="nextTimePeriodId"/>
                 <script>
                     while (curSubPeriodId) {
@@ -1786,6 +1796,25 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <iterate list="glAccountOrgTimePeriodList" entry="glAccountOrgTimePeriod">
                     <if condition="glAccountIdsWithTrans.contains(glAccountOrgTimePeriod.glAccountId)"><continue/></if>
+
+                    <!-- sssonline (#1357): this account has no posted entries left in the period (its only transaction was
+                        unposted, deleted or moved to another date), so nothing above touched its record and the amounts
+                        from the earlier posting stayed. Posted amounts go back to zero and the period ends where it
+                        began, before that ending balance is carried forward below. -->
+                    <set field="staleBeginningBalance" from="glAccountOrgTimePeriod.beginningBalance ?: 0.0"/>
+                    <if condition="(glAccountOrgTimePeriod.postedDebits ?: 0.0) != 0.0 || (glAccountOrgTimePeriod.postedCredits ?: 0.0) != 0.0 ||
+                            (glAccountOrgTimePeriod.postedDebitsNoClosing ?: 0.0) != 0.0 || (glAccountOrgTimePeriod.postedCreditsNoClosing ?: 0.0) != 0.0 ||
+                            (glAccountOrgTimePeriod.endingBalance ?: 0.0) != staleBeginningBalance">
+                        <log message="In recalculate GLAOS account ${glAccountOrgTimePeriod.glAccountId} period ${timePeriodId} has no posted entries left; clearing postedDebits=${glAccountOrgTimePeriod.postedDebits} postedCredits=${glAccountOrgTimePeriod.postedCredits} endingBalance=${glAccountOrgTimePeriod.endingBalance} (beginningBalance=${staleBeginningBalance})"/>
+                        <set field="glAccountOrgTimePeriod.postedDebits" from="0.0"/>
+                        <set field="glAccountOrgTimePeriod.postedCredits" from="0.0"/>
+                        <set field="glAccountOrgTimePeriod.postedDebitsNoClosing" from="0.0"/>
+                        <set field="glAccountOrgTimePeriod.postedCreditsNoClosing" from="0.0"/>
+                        <set field="glAccountOrgTimePeriod.endingBalance" from="staleBeginningBalance"/>
+                        <set field="glAccountOrgTimePeriod.balanceLastUpdated" from="nowTimestamp"/>
+                        <entity-update value-field="glAccountOrgTimePeriod"/>
+                        <set field="gaotpUpdated" from="gaotpUpdated + 1"/>
+                    </if>
 
                     <set field="lastGlAccountOrgTimePeriod" from="glAccountOrgTimePeriod"/>
                     <iterate list="subsequentPeriodIds" entry="subsequentPeriodId">
